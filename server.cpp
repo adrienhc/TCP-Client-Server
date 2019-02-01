@@ -21,7 +21,7 @@
 
 using namespace std;
 
-#define MAX_FILE 1000 //104 Mib
+#define MAX_FILE 1000 
 
 //ADD SIGNALS SIG
 void sighandler_term(int);
@@ -61,7 +61,6 @@ void* runner(void* struct_arg)
     const char* file_name = file_string.c_str();
     cout << "FILE NAME = " << file_name << endl;
 
-    //ofstream file(file_name.c_str());
     FILE * fptr = fopen(file_name, "w");
     if (fptr == NULL)
     {
@@ -78,9 +77,8 @@ void* runner(void* struct_arg)
     }
 
 
-    //DETUP BUFFER AND READIGN STREAM 
+    //SETUP BUFFER  
     char buf[MAX_FILE] = {0};
-   // stringstream ss;
 
     //TIMEOUT
     struct timeval timeout;
@@ -107,17 +105,35 @@ void* runner(void* struct_arg)
         if (!FD_ISSET(fds, &thread_read))
         {
             cerr << "ERROR: Client timed out -- Closing thread" << endl;
-            if (truncate(file_name, 0) < 0)
+             fptr = fopen(file_name, "w");
+             if (fptr == NULL)
              {
                 cerr << "ERROR: could not truncate file -- Closing thread" << endl;
+                fclose(fptr);
+                int closed = close(fds);
+                if (closed == -1)
+                {
+                  cerr << "ERROR: in closing the client socket -- Closing" << endl;
+                }
+
+                pthread_exit(NULL);
              }
+
              string error = "ERROR";
              const char* c_error = error.c_str();
              if (fwrite(c_error, 1, 5, fptr) < 0)
              {
                 cerr << "ERROR: Could not write to file -- Closing thread" << endl;
              }
-             break;
+             
+            fclose(fptr);
+            int closed = close(fds);
+            if (closed == -1)
+            {
+              cerr << "ERROR: in closing the client socket -- Closing" << endl;
+            }
+
+            pthread_exit(NULL);
         }
 
 
@@ -276,7 +292,7 @@ int main(int argc, char* argv[])
         if (created)
         {
             cerr << "ERROR: Unble to create thread -- Closing Socket" << endl;
-            int closed = clientSocketfd;//close(client_socket[i]);
+            int closed = clientSocketfd;
             if (closed == -1)
             {
               cerr << "ERROR: in closing the client socket -- Closing" << endl;
@@ -302,11 +318,6 @@ int main(int argc, char* argv[])
 }
 
 
-/*
-
-OLD READ :  if (_read == -1 && (errno!=EINTR) && (errno!=EWOULDBLOCK))
-
-*/
 void sighandler_term(int signum)
 {
     cout << "Caught SIGTERM -- Closing" << endl;

@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <time.h>
 
 using namespace std;
 
@@ -33,8 +34,7 @@ int main(int argc, char* argv[])
     cerr << "ERROR: Invalid Hostname: " << server_ip << " -- Closing" << endl;
     return 1; 
   }
-  cout << "HOST IS " << host->h_name << endl;
-  cout << "ADDR IS " << inet_ntoa( *(struct in_addr*) (host-> h_addr)) << endl;
+
   int port = stoi(argv[2]);
   if (port <= 1023)
   {
@@ -54,7 +54,6 @@ int main(int argc, char* argv[])
   fseek(fptr, 0, SEEK_END);
   long fSize = ftell(fptr);
   rewind(fptr);
-  cout << "START POS IS " << ftell(fptr) << endl;
 
 
   //Setup the socket
@@ -72,6 +71,10 @@ int main(int argc, char* argv[])
   serv_addr.sin_addr.s_addr = inet_addr(inet_ntoa( *(struct in_addr*) (host-> h_addr))); //server ip prodived by user
   memset(serv_addr.sin_zero, '\0', sizeof(serv_addr.sin_zero));
 
+
+  //GET TIME
+  time_t before_connect = time(NULL);
+
   int connected = connect(socketfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
   if (connected == -1)
   {
@@ -79,20 +82,26 @@ int main(int argc, char* argv[])
     cerr << "ERROR: in connecting the socket -- Closing" << endl;
     return 1;
   }
+  
+  time_t after_connect = time(NULL);
 
-  //cout << file_content << endl;
- 
-  //Write whole string file by chunks of 1000 bits!
+  //COMPARE TIME 
+  if (difftime(after_connect, before_connect) > 15.0)
+  {
+    cerr << "ERROR: Timeout, took too long to connect -- Closing" << endl;
+    int closed = close(socketfd);
+    if (closed == -1)
+        cerr << "ERROR: in closing the socket -- Closing" << endl; 
+    return 1;
+  }
+
+
   long k = 0;
-  //int f_size = file_content.length();
   long f_size = fSize;
-
-  cout << "FILE SIZE IS " << f_size << endl;
   char buffer[1000];
 
   for (k = 0; k < f_size -1000; k += 1000)
   {
-      //cout << "SIZE BUF = " << sizeof(buffer) / sizeof(char) << endl;
       if (fread(buffer, 1, sizeof(buffer), fptr) != sizeof(buffer))
       {
       cerr << "ERROR: Could not read from file -- Closing" << endl;
@@ -100,28 +109,30 @@ int main(int argc, char* argv[])
       return 1;
     }
 
+    time_t before_msg = time(NULL);
+
     int wrote = write(socketfd, buffer, 1000);
-    
-    //int wrote = write(socketfd, , 1000);
     if (wrote == -1)
     {
       cerr << "ERROR: in writing to the server -- Closing" << endl;
       return 1;
     }
 
-    //fseek(fptr, 1000, SEEK_CUR);
+    time_t after_msg = time(NULL);
+    if (difftime(after_msg, before_msg) > 15.0)
+    {
+      cerr << "ERROR: Timeout, took too long to write to server -- Closing" << endl;
+      int closed = close(socketfd);
+      if (closed == -1)
+          cerr << "ERROR: in closing the socket -- Closing" << endl; 
+      return 1;
+    }
+
     memset(buffer, '\0', sizeof(buffer));
 
   }
 
-  //send remaining bits
-  cout << "SEND LAST PART !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << endl;
-  //k -= 1000;
-  
-  //string rest = file_content.substr(k);
-  //cout << "SEND: " << endl << rest << endl;
   long rest = fSize - ftell(fptr); 
-  cout << "REST IS " << rest << endl;
   char buff_end[rest];
 
   if( fread(buff_end, 1, sizeof(buffer), fptr) != sizeof(buff_end) )
@@ -130,14 +141,24 @@ int main(int argc, char* argv[])
       return 1;
     }
 
+  time_t before_last = time(NULL);
   int wrote = write(socketfd, buff_end, rest);
   if (wrote == -1)
   {
     cerr << "ERROR: in writing last part to the server -- Closing" << endl;
     return 1;
   }  
+  time_t after_last = time(NULL);
 
-  //cout << "SEND: " << endl << *buff_end << endl;
+  if (difftime(after_last, before_last) > 15.0)
+  {
+    cerr << "ERROR: Timeout, took too long to write last msg to server -- Closing" << endl;
+    int closed = close(socketfd);
+    if (closed == -1)
+        cerr << "ERROR: in closing the socket -- Closing" << endl; 
+    return 1;
+  }
+
   
 
   int closed = close(socketfd);
@@ -149,32 +170,3 @@ int main(int argc, char* argv[])
 
   return 0;
 }
-
-//string file_content;
-  //ifstream File (file_dir, ios::in | ios::binary);
-  //ifstream File(file_dir);
-  //File.exceptions (ifstream::failbit | ifstream::badbit);
-
-  /*try
-  {
-   // filebuf* pbuf = File.rdbuf();
-   // size_t size = pbuf->pubseekof(0, File.end, File.in);
-   // pbuf->pubseekof(0, File.in);
-
-    //File.open(file_dir);
-    //stringstream fileStream;
-    //fileStream << File.rdbuf();
-    //File.close();
-    //file_content = fileStream.str();*/
-  
-    /*ostringstream content;
-    content << File.rdbuf();
-    File.close();
-    file_content = content.str();*/
-
-/*  }
-  catch(ifstream::failure e)
-  {
-    cerr << "ERROR: in reading from the file" << endl;
-    return 1;
-  }*/
