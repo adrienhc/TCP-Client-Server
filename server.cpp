@@ -1,89 +1,321 @@
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/select.h> 
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h> 
+#include <pthread.h>
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
 
-int
-main()
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+
+using namespace std;
+
+#define MAX_FILE 1000 //104 Mib
+
+//ADD SIGNALS SIG
+void sighandler_term(int);
+void sighandler_quit(int);
+
+struct thread_args 
 {
-  // create a socket using TCP IP
-  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int thread_id;
+    int index;
+    int fds;
+    string file_path;
+};
 
-  // allow others to reuse the address
-  int yes = 1;
-  if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-    perror("setsockopt");
+
+
+
+
+
+
+
+
+
+
+void* runner(void* struct_arg)
+{
+    struct thread_args *args = (struct thread_args*) struct_arg;
+    int thread_id = args->thread_id;
+    int index = args->index;
+    int fds = args->fds; 
+    string file_path = args->file_path;
+
+    cout << "My index is = " << index << endl;
+
+
+    //CREATE FILE / Open a file
+    string file_string = "." + file_path + "/" + to_string(index+1) + ".file";
+    const char* file_name = file_string.c_str();
+    cout << "FILE NAME = " << file_name << endl;
+
+    //ofstream file(file_name.c_str());
+    FILE * fptr = fopen(file_name, "w");
+    if (fptr == NULL)
+    {
+        cerr << "ERROR: in opening the file" << endl;
+
+        int closed = close(fds);
+        if (closed == -1)
+        {
+          cerr << "ERROR: in closing the client socket -- Closing" << endl;
+        }
+
+        pthread_exit(NULL);
+        
+    }
+
+
+    //DETUP BUFFER AND READIGN STREAM 
+    char buf[MAX_FILE] = {0};
+   // stringstream ss;
+
+    //TIMEOUT
+    struct timeval timeout;
+
+    while (1)
+    {
+
+        fd_set thread_read;
+        FD_ZERO(&thread_read);
+        FD_SET(fds, &thread_read);
+
+        timeout.tv_sec = 15;
+        timeout.tv_usec = 0;
+
+        int selected = select( fds + 1 , &thread_read , NULL , NULL , &timeout);   //wait for incoming connection
+       
+        if ((selected < 0)) // && (errno!=EINTR))   
+        {   
+             cerr << "ERROR: in select -- Closing thread" << endl;
+             break;
+        }  
+
+
+        if (!FD_ISSET(fds, &thread_read))
+        {
+            cerr << "ERROR: Client timed out -- Closing thread" << endl;
+            if (truncate(file_name, 0) < 0)
+             {
+                cerr << "ERROR: could not truncate file -- Closing thread" << endl;
+             }
+             string error = "ERROR";
+             const char* c_error = error.c_str();
+             if (fwrite(c_error, 1, 5, fptr) < 0)
+             {
+                cerr << "ERROR: Could not write to file -- Closing thread" << endl;
+             }
+             break;
+        }
+
+
+        int _read = read(fds, buf, (size_t) sizeof(buf));
+        if (_read == 0) //if nothing to read anymore             
+        {
+            cout << "Nothing left to read from client -- Closing thread " << thread_id << endl;
+            break;
+        }
+        else // perform the reading and store it into the file 
+        {
+            if (fwrite(buf, 1, _read, fptr) < 0)
+            {
+                cerr << "ERROR: Could not write to file -- Closing thread" << endl;
+                break;
+            }
+            memset(buf, '\0', sizeof(buf));
+        }
+    }
+
+    //CLEANUP
+    fclose(fptr);
+    int closed = close(fds);
+    if (closed == -1)
+    {
+      cerr << "ERROR: in closing the client socket -- Closing" << endl;
+    }
+
+    pthread_exit(NULL);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int main(int argc, char* argv[])
+{
+  if (argc != 3)
+  {
+    cerr << "ERROR: Wrong number of arguments, need 2: <PORT> <FILE-DIR> -- Closing" << endl;
+    return 1;  
+  }
+
+  int port = stoi(argv[1]);
+  string file_dir = argv[2]; 
+  if (port <= 1023)
+  {
+    cerr << "ERROR: Port is " << port << "must be 1023 < ! -- Closing" << endl;
+    return 1;  
+  }
+
+
+// SIGNALS
+  signal(SIGTERM, sighandler_term);
+  signal(SIGQUIT, sighandler_quit);
+
+
+//# THREADS 
+  int curr_threads = 0;
+  int max_threads = 10;
+//# CLIENTS
+  int max_clients = 10;
+//FDS
+  int max_sd;
+  fd_set readfds;
+
+
+  //Setup the socket
+  int socketfd = socket(PF_INET, SOCK_STREAM, 0);
+  if (socketfd == -1)
+  {
+    cerr << "ERROR: in creating the Socket -- Closing" << endl;
     return 1;
   }
 
-  // bind address to socket
+  int non_block = fcntl(socketfd, F_SETFL, O_NONBLOCK);
+  if (non_block == -1)
+  {
+    cerr << "ERROR: in making socket non_block -- Closing" << endl;
+    return 1;
+  }
+
   struct sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(40000);     // short, network byte order
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  addr.sin_family = PF_INET;
+  addr.sin_port = htons(port); //port provided by user
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1"); //Local host
   memset(addr.sin_zero, '\0', sizeof(addr.sin_zero));
+  int addrlen = sizeof(addr);
 
-  if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-    perror("bind");
-    return 2;
+  int bound = bind(socketfd, (struct sockaddr*)&addr, addrlen);
+  if (bound == -1)
+  {
+    cerr << "ERROR: in binding socket -- Closing" << endl;
+    return 1;
   }
 
-  // set socket to listen status
-  if (listen(sockfd, 1) == -1) {
-    perror("listen");
-    return 3;
+
+  int listener = listen(socketfd, max_clients); //up to 10 simultaneous connections
+  if (listener == -1)
+  {
+    cerr << "ERROR: in getting in listening mode -- Closing" << endl;
+    return 1;
   }
 
-  // accept a new connection
-  struct sockaddr_in clientAddr;
-  socklen_t clientAddrSize = sizeof(clientAddr);
-  int clientSockfd = accept(sockfd, (struct sockaddr*)&clientAddr, &clientAddrSize);
+  while(1)
+  {
+      FD_ZERO(&readfds); //clear the set of sockets
+      FD_SET(socketfd, &readfds); //add server socket  
+      max_sd = socketfd;
+      
+      int selected = select( max_sd + 1 , &readfds , NULL , NULL , NULL);   //wait for incoming connection
+       
+      if ((selected == -1) && (errno!=EINTR))   
+      {  
+         cout << "Selected = " << selected << endl;
+         perror("select") ;
+         cerr << "ERROR: in selecting new client connections -- Closing" << endl;
+         return 1;
+      }   
+      
 
-  if (clientSockfd == -1) {
-    perror("accept");
-    return 4;
-  }
+    if (FD_ISSET(socketfd, &readfds)) //if Server Socket changed, have an incoming connection -- create thread there
+    {
+          int clientSocketfd = accept(socketfd, (struct sockaddr*)&addr, (socklen_t*)&addrlen);
+          if (clientSocketfd == -1) 
+          {
+            perror("accept");
+           cerr << "ERROR: in accepting new client connections -- Closing" << endl;
+           return 1;
+          } 
 
-  char ipstr[INET_ADDRSTRLEN] = {'\0'};
-  inet_ntop(clientAddr.sin_family, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
-  std::cout << "Accept a connection from: " << ipstr << ":" <<
-    ntohs(clientAddr.sin_port) << std::endl;
+          int client_non_block = fcntl(clientSocketfd, F_SETFL, O_NONBLOCK);
+          if (client_non_block == -1)
+          {
+            cerr << "ERROR: in making client socket non_block -- Closing" << endl;
+            return 1;
+          }
 
-  // read/write data from/into the connection
-  bool isEnd = false;
-  char buf[20] = {0};
-  std::stringstream ss;
+        pthread_t client_thread;
+        struct thread_args Args;
+        Args.thread_id = client_thread;
+        Args.index = curr_threads;
+        Args.fds = clientSocketfd;
+        Args.file_path = file_dir;
 
-  while (!isEnd) {
-    memset(buf, '\0', sizeof(buf));
+        int created = pthread_create(&client_thread, NULL, runner, (void*) &Args);
+        if (created)
+        {
+            cerr << "ERROR: Unble to create thread -- Closing Socket" << endl;
+            int closed = clientSocketfd;//close(client_socket[i]);
+            if (closed == -1)
+            {
+              cerr << "ERROR: in closing the client socket -- Closing" << endl;
+              return 1; 
+            }
+        }
 
-    if (recv(clientSockfd, buf, 20, 0) == -1) {
-      perror("recv");
-      return 5;
+        if (curr_threads == max_threads-1) //hit max number of threads
+            curr_threads = 0;
+        else
+            curr_threads++;
     }
 
-    ss << buf << std::endl;
-    std::cout << buf << std::endl;
-
-    if (send(clientSockfd, buf, 20, 0) == -1) {
-      perror("send");
-      return 6;
-    }
-
-    if (ss.str() == "close\n")
-      break;
-
-    ss.str("");
   }
 
-  close(clientSockfd);
+  int closed = close(socketfd);
+  if (closed == -1)
+  {
+      cerr << "ERROR: in closing the client socket -- Closing" << endl;
+  }
 
   return 0;
+}
+
+
+/*
+
+OLD READ :  if (_read == -1 && (errno!=EINTR) && (errno!=EWOULDBLOCK))
+
+*/
+void sighandler_term(int signum)
+{
+    cout << "Caught SIGTERM -- Closing" << endl;
+    exit(0);
+
+}
+
+void sighandler_quit(int signum)
+{
+    cout << "Caught SIGQUIT -- Closing" << endl;
+    exit(0);
 }
