@@ -6,15 +6,16 @@ Adrien HADJ-CHAIB
 004800889
 
 Client Design:
-	The client first sets up the sockets, connects to the server. Once this is done, it
-	 opens the file to be sent over with a C style FILE* pointer. We then compute the file 
-	 of the size and fread the file 1000 bytes by 1000 bytes. Each read is placed into a 
-	 1000 bytes buffer, which is written out to through the socket. I also made sure 
-	 onnecting ans two successive writes werent separated by more than 15 seconds. We stop 
+	The client first checks its CL arguments and sets up the sockets, connects to the server. 
+	Once this is done, it opens the file to be sent over with a C style FILE* pointer. 
+	We then compute the file  of the size and fread the file 1000 bytes by 1000 bytes. 
+	Each read is placed into a  1000 bytes buffer, which is written out to through the socket. 
+	I also made sure connecting and two successive writes werent separated by more than 15 seconds. We stop 
 	 doing the 1000 bytes until we have less than 1000 bytes remaining. We then create a 
 	 buffer of the size of the remainder of the file and send it over through the network.
 
 Server Design:
+	The server first checks its CL arguments and if the directory exists or creates one if possible.
 	The server sets up its receiving socket in Non Blocking mode. Then we use a combination 
 	of file descriptors, the functions FD_ and select() to wait for and accept incoming 
 	connections. 

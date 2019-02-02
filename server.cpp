@@ -2,6 +2,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/select.h> 
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string.h>
@@ -10,7 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h> 
 #include <pthread.h>
-
+#include <dirent.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -55,9 +56,8 @@ void* runner(void* struct_arg)
 
     cout << "My index is = " << index << endl;
 
-
     //CREATE FILE / Open a file
-    string file_string = "." + file_path + "/" + to_string(index+1) + ".file";
+    string file_string = file_path + "/" + to_string(index+1) + ".file";
     const char* file_name = file_string.c_str();
     cout << "FILE NAME = " << file_name << endl;
 
@@ -195,6 +195,33 @@ int main(int argc, char* argv[])
   }
 
 
+  //CREATE DIR / CHECK IF EXISTS
+  DIR* dptr = opendir(file_dir.c_str());
+  if (dptr)
+  {
+    cout << "Directory already exists, closing it" << endl;
+    if (closedir(dptr) < 0)
+    {
+      cerr << "ERROR: Could Not Close Directory -- Closing" << endl;
+      return 1;
+    }
+  }
+  else if (ENOENT == errno)
+  {
+    if(mkdir(file_dir.c_str(), 0777) < 0)
+    {
+      cerr << "ERROR: could not create directory -- Closing" << endl;
+      return 1;
+    }
+    else
+      cout << "Successfully Created the Directory" << endl;
+  }
+  else
+  {
+    cerr << "Could Not Open the Directory -- Closing" << endl;
+    return 1;
+  }
+
 // SIGNALS
   signal(SIGTERM, sighandler_term);
   signal(SIGQUIT, sighandler_quit);
@@ -228,7 +255,7 @@ int main(int argc, char* argv[])
   struct sockaddr_in addr;
   addr.sin_family = PF_INET;
   addr.sin_port = htons(port); //port provided by user
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1"); //Local host
+  addr.sin_addr.s_addr = INADDR_ANY;
   memset(addr.sin_zero, '\0', sizeof(addr.sin_zero));
   int addrlen = sizeof(addr);
 
